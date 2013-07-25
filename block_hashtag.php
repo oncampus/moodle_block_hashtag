@@ -52,62 +52,91 @@ class block_hashtag extends block_base {
 
     function get_content() {
     	
-    	if ($this->content !== NULL) {
+		if ($this->content !== NULL) {
             return $this->content;
         }
-		
-		global $DB;
-		
-		$course_id = $this->page->course->id;
-		
-		// get ir numbers from linked content by url
-		$query = "SELECT externalurl FROM mdl_url WHERE course = $course_id AND externalurl LIKE '%/ir%'";
-		$return = $DB->get_records_sql($query);
-		
-		$ir_numbers = array();
-		$hashtags = array();
-		foreach($return as $r){
-			// get from ir to the end
-			$ir_number = substr($r->externalurl, strpos($r->externalurl, "/ir")+3);
-			// cut the end
-			$ir_number = substr($ir_number, 0 , strpos($ir_number, "/"));
-			
-			// collect hashtag
-			if(!in_array($ir_number, $ir_numbers)){
-				$ir_numbers[] = $ir_number;
-				
-				$url = get_config('block_hashtag','moodalis_link')."?ir=".$ir_number;
-				
-				$ch = curl_init();
-				curl_setopt($ch, CURLOPT_URL,$url);
-				curl_setopt($ch, CURLOPT_FAILONERROR, 1);
-				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
-				curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
-				curl_setopt($ch, CURLOPT_TIMEOUT, 180);
-				curl_setopt($ch, CURLOPT_POST, 1);
-				curl_setopt($ch, CURLOPT_POSTFIELDS, $postfields);
-				$result = curl_exec($ch);
-				curl_close($ch);
-				
-				$result = unserialize($result);
-				
-				if(count($result) > 0)
-					$hashtags[] = ($result);
-				
-			}
-		}
 		
 		$this->content = new stdClass;
 		$this->content->text = '';
 		$this->content->footer = '';
 		
-		// print each single hashtag
-		array_unique($hashtags);
+		// temporary return empty block while cURL is being debugged
+		#return $this->content;
+		//////////////////////
 		
-		if(count($hashtags) > 0){
-			foreach($hashtags as $hashtag){
-				$this->content->text  .= "<br /><a target=\"_blank\" alt=\"$hashtag\" title=\"".get_string('link_to', 'block_hashtag')."$hashtag\" href='http://www.twitter.com/search/$hashtag'>#$hashtag</a>";
+		global $DB, $SESSION;
+		
+		// include library fuer DB zugriff auf portal und IR nummer finden
+		$file = "/opt/www/moodle/oncampus/modulfeedbacklib.php";
+		if (is_file($file)) {
+			require_once($file);
+		}
+
+
+		$course_id = $this->page->course->id;
+		$course_idnumber = $this->page->course->idnumber;
+		$debug .= "cid: ".$course_idnumber;
+		
+		// Hole Hashtag aus Session oder ueber portal und moodalis
+		if(isset($SESSION->hash[$course_id])){
+			
+			$hashtag = $SESSION->hash[$course_id];
+			$debug .= "sess: ".$hashtag;
+			
+		}else{
+			
+			if(function_exists('getIR')){
+				$irnumber = getIR($course_idnumber);
+				$debug .= "ir: ".serialize($irnumber);
+				$irnumber = $irnumber[0][0];
+				$debug .= "ir: ".$irnumber;
+			}else{
+				$this->content->text .= 'Library konnte nicht geladen werden';
+				return $this->content;
 			}
+			
+			if(isset($irnumber) && is_numeric($irnumber)){
+				
+				$url = get_config('block_hashtag','moodalis_link')."?ir=".$irnumber;
+				
+				$debug .= "\nurl: ".$url;
+				
+				$ch = curl_init();
+				curl_setopt($ch, CURLOPT_URL,$url);
+				curl_setopt($ch, CURLOPT_PROXYPORT,80);
+				curl_setopt($ch, CURLOPT_PROXY, "proxy.oncampus.de");
+				curl_setopt($ch, CURLOPT_FAILONERROR, 1);
+				curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+				curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+				curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+				curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, FALSE);
+				$result = curl_exec($ch);
+				curl_close($ch);
+				
+				$result = unserialize($result);
+				
+				$debug .= " res1: ".$result;
+					
+				if(count($result) > 0){
+					$debug .= "res2: ".$result;
+					// Speichern fuer Ausgabe im text
+					$hashtag = $result;
+					// spiechern fuer spaetere Seitenaufrufe
+					$SESSION->hash[$course_id] = $hashtag;
+				}
+				
+			}else{
+				$debug .= "null ";
+			}
+
+		}
+		
+		// DEBUG
+		#$this->content->text .= "debug: ".$debug;
+		
+        // Ausgabe im Block
+		if($hashtag){
+			$this->content->text .= "<a target=\"_blank\" alt=\"$hashtag\" title=\"".get_string('link_to', 'block_hashtag')."$hashtag\" href='http://www.twitter.com/search/$hashtag'>#$hashtag</a>";
 			$this->content->text .= "<br /><br/>".get_string('more_infos', 'block_hashtag')."<a target=\"_blank\" href=\"".get_config('block_hashtag','oncampuspedia_link')."\">oncampuspedia</a>";
 		}
 		
