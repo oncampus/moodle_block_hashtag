@@ -39,7 +39,7 @@ class block_hashtag extends block_base {
     }
 
     function has_config() {
-        return false;
+        return true;
     }
 
     function applicable_formats() {
